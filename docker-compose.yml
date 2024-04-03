@@ -1,0 +1,77 @@
+version: "3.6"
+services:
+  mainchain:
+    hostname: mainchain
+    build: ./mainchain
+
+  ethside:
+    depends_on:
+      - mainchain
+    build: ./ethside
+    ports:
+      - "8545:8545"
+
+  api:
+    image: web3labs/epirus-free-api:latest
+    profiles: [ "explorer" ]
+    environment:
+      - NODE_ENDPOINT=http://ethside:8545
+      - MONGO_CLIENT_URI=mongodb://mongodb:27017
+      - REINDEX_ENDPOINT=http://ingestion/reindex/
+      - MONGO_DB_NAME=epirus
+      - MONGO_CREATE_INDICES=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - ethside
+      - redis
+      - mongodb
+
+  mongodb:
+    profiles: [ "explorer" ]
+    image: mongo:5.0.8
+    environment:
+      - COMPOSE_HTTP_TIMEOUT=900
+      - DOCKER_CLIENT_TIMEOUT=900
+    entrypoint: mongod --bind_ip "0.0.0.0"
+
+  redis:
+    profiles: [ "explorer" ]
+    image: redis
+    restart: unless-stopped
+    container_name: redis
+
+  web:
+    profiles: [ "explorer" ]
+    image: web3labs/epirus-free-web:latest
+    environment:
+      - API_URL=/api
+      - WS_API_URL=http://localhost:8090
+      - DISPLAY_NETWORK_TAB=disabled
+    depends_on:
+      - api
+
+  ingestion:
+    profiles: [ "explorer" ]
+    image: web3labs/epirus-free-ingestion:latest
+    environment:
+      - NODE_ENDPOINT=http://ethside:8545
+      - MONGO_CLIENT_URI=mongodb://mongodb:27017
+      - MONGO_DB_NAME=epirus
+      - LIST_OF_METRICS_TO_CALCULATE_PER_MINUTE=hourly,daily,monthly,yearly
+    depends_on:
+      - ethside
+      - mongodb
+      - redis
+
+  nginx:
+    profiles: [ "explorer" ]
+    image: nginx:latest
+    volumes:
+      - ./epirus/nginx.conf:/etc/nginx/nginx.conf
+      - ./epirus/5xx.html:/www/error_pages/5xx.html
+    ports:
+      - 8080:80
+    depends_on:
+      - api
+      - web
